@@ -1,111 +1,86 @@
-#include <WiFi.h>
 #include <esp_now.h>
+#include <WiFi.h>
 
-/* h-bridge */
-// left motor a
-int motor1pin1 = 26;
-int motor1pin2 = 27;
+#include <Wire.h>
 
-// right motor b
-int motor2pin1 = 18;
-int motor2pin2 = 19;
+#include <Arduino.h>
 
-// enable a and b motor
-int enable_pin_a = 4;
-int enable_pin_b = 5;
+#define RELAY_PIN 0 // ESP32 pin 0, which connects to the IN pin of relay
+#define echoPin 5 // attach pin D2 Arduino to pin Echo of HC-SR04
+#define trigPin 18 //attach pin D3 Arduino to pin Trig of HC-SR04
 
-// ultrasonic distance sensor
-const int trigger_pin = 23;
-const int echo_pin = 22;
+// REPLACE WITH THE MAC Address of your receiver 
+uint8_t broadcastAddress[] = {0x84, 0x0D, 0x8E, 0xE4, 0xAB, 0x00};
 
-// instansiate mac address of the controller
- uint8_t broadcastAddress[] = {0x24, 0x0A, 0xC4, 0xD6, 0xC5, 0xE4};
-// uint8_t broadcastAddress[] = {0x10, 0x97, 0xBD, 0xD5, 0x3C, 0x34};
+// Define variables to store sensor readings to be sent
+float moisture;
+long duration; // variable for the duration of sound wave travel
+int distance; // variable for the distance measurement
 
+// Define variables to store incoming readings
+float incomingMoist;
 
-float incoming_x;
-float incoming_y;
-
+// Variable to store if sending data was successful
 String success;
 
-typedef struct struct_distance {
-  int cm;
-} struct_distance;
-
-typedef struct struct_message_tank {
-  float waterDist;
-} struct_message_tank;
-
-struct_message_tank tankReadings;
-
+//Structure example to send data
+//Must match the receiver structure
 typedef struct struct_message {
-    float x;
-    float y;
+    float moist;
 } struct_message;
 
-struct_message message;
+// Create a struct_message called sensorReadings to hold sensor readings
+struct_message sensorReadings;
 
-struct_message incomingMessage;
-
-struct_distance distance_to_controller;
+// Create a struct_message to hold incoming sensor readings
+struct_message incomingReadings;
 
 esp_now_peer_info_t peerInfo;
 
+// Callback when data is sent
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  Serial.print("\r\nLast Packet Send Status:\t");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
-  if (status == 0) {
-    success = "Delivery Success";
+  //Serial.print("\r\nLast Packet Send Status:\t");
+ // Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+  if (status ==0){
+    success = "Delivery Success :)";
   }
-  else {
+  else{
     success = "Delivery Fail :(";
   }
 }
 
 // Callback when data is received
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
-  memcpy(&message, incomingData, sizeof(message));
+  memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
   //Serial.print("Bytes received: ");
   //Serial.println(len);
+  incomingMoist = incomingReadings.moist;
+}
  
-  incoming_x = message.x;
-  incoming_y = message.y;
+void setup() {
+  pinMode(trigPin, OUTPUT); // Sets the trigPin as an OUTPUT
+  pinMode(echoPin, INPUT); // Sets the echoPin as an INPUT
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, HIGH);
 
   
-}
-
-void setup() {
-  // put your setup code here, to run once:
+  // Init Serial Monitor
   Serial.begin(115200);
+
+  // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
 
-  // set h-bridge pins to output
-  pinMode(motor1pin1, OUTPUT);
-  pinMode(motor1pin2, OUTPUT);
-  pinMode(motor2pin1, OUTPUT);
-  pinMode(motor2pin2, OUTPUT);
-  pinMode(enable_pin_a, OUTPUT);
-  pinMode(enable_pin_b, OUTPUT);
-
-  // set trigger pin as output
-  pinMode(trigger_pin, OUTPUT);
-
-  // set echo pin as input
-  pinMode(echo_pin, INPUT);
-
-    // Init ESP-NOW
+  // Init ESP-NOW
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
     return;
   }
 
-    /* Once ESP-NOW is successfully init, we will register for send cb to 
-     get the status of transmittet packets.
-  */
+  // Once ESPNow is successfully Init, we will register for Send CB to
+  // get the status of Trasnmitted packet
   esp_now_register_send_cb(OnDataSent);
   
-  //Serial.println("Mac address for the wrom wroom: " + WiFi.macAddress());
-
+  // Register peer
   memcpy(peerInfo.peer_addr, broadcastAddress, 6);
   peerInfo.channel = 0;  
   peerInfo.encrypt = false;
@@ -114,93 +89,63 @@ void setup() {
   if (esp_now_add_peer(&peerInfo) != ESP_OK){
     Serial.println("Failed to add peer");
     return;
-  } else {
-    Serial.println("added to peer");
   }
-  
-    // Register for a callback function that will be called when data is received
+  // Register for a callback function that will be called when data is received
   esp_now_register_recv_cb(OnDataRecv);
 }
-
+ 
 void loop() {
-  // put your main code here, to run repeatedly:
-//  Serial.println("x: ");
-//  Serial.println(incoming_x);
-//  Serial.println("y: ");
-//  Serial.println(incoming_y);
-//  Serial.println("y: " + incoming_y);
-//  delay(100);
-
-  unsigned long pulseLength;
-  unsigned int centimeters;
-
-  digitalWrite(trigger_pin, LOW);
-  delayMicroseconds(5);
-  digitalWrite(trigger_pin, HIGH);
+  // Clears the trigPin condition
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  // Sets the trigPin HIGH (ACTIVE) for 10 microseconds
+  digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  // Reads the echoPin, returns the sound wave travel time in microseconds
+  duration = pulseIn(echoPin, HIGH);
+  // Calculating the distance
+  distance = duration * 0.034 / 2; // Speed of sound wave divided by 2 (go and back)
+  // Displays the distance on the Serial Monitor
+  Serial.print("ESP Water tank readings");
+  Serial.print('\n');
+  Serial.print("Distance: ");
+  Serial.print(distance);
+  Serial.println(" cm");
+  getReadings();
 
-  pulseLength = pulseIn(echo_pin, HIGH);
+  // Set values to send
+  sensorReadings.moist = 11;
 
-  centimeters = pulseLength / 58;
-
-  distance_to_controller.cm = centimeters;
-
-  // tankReadings.waterDist = centimeters;
-
-//  delay(10000);
-
-//  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &tankReadings, sizeof(tankReadings));
-  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &distance_to_controller, sizeof(distance_to_controller));
-
+  // Send message via ESP-NOW
+  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &sensorReadings, sizeof(sensorReadings));
+   
   if (result == ESP_OK) {
-    Serial.println("Sent with success");
+    //Serial.println("Sent with success");
   }
   else {
     Serial.println("Error sending the data");
   }
-  delay(100);
-  Serial.println("cm: ");
-  Serial.println(centimeters);
-  
-  analogWrite(enable_pin_a, 255);
-  analogWrite(enable_pin_b, 245);
+  handlePump();
 
-  if (incoming_x > -3 && incoming_x < 4 && incoming_y > -3 && incoming_y < 4) {
-    analogWrite(enable_pin_a, 0);
-    analogWrite(enable_pin_b, 0);
+  delay(10000);
+}
+void getReadings(){
+  moisture = 11;
 
-    digitalWrite(motor1pin1, LOW);
-    digitalWrite(motor1pin2, LOW);
-    digitalWrite(motor2pin1, LOW);
-    digitalWrite(motor2pin2, LOW);
-  }
-  if(incoming_x > 4) {
-    digitalWrite(motor1pin1, HIGH);
-    digitalWrite(motor1pin2, LOW);
+}
 
-    digitalWrite(motor2pin1, HIGH);
-    digitalWrite(motor2pin2, LOW);
-  }
-  if (incoming_y > 4) {
-    digitalWrite(motor1pin1, LOW);
-    digitalWrite(motor1pin2, HIGH);
+void handlePump(){
+  // Display Readings in Serial Monitor
+  Serial.println("ESP Garden bed readings");
+  Serial.print("Moisture: ");
+  Serial.print(incomingReadings.moist);
 
-    digitalWrite(motor2pin1, HIGH);
-    digitalWrite(motor2pin2, LOW);
-  }
-  if (incoming_x < -3) {
-    digitalWrite(motor1pin1, LOW);
-    digitalWrite(motor1pin2, HIGH);
-    
-    digitalWrite(motor2pin1, LOW);
-    digitalWrite(motor2pin2, HIGH);
-  }
-  if (incoming_y < -3) {
-    digitalWrite(motor1pin1, HIGH);
-    digitalWrite(motor1pin2, LOW);
+  if(incomingReadings.moist<20 && distance<13){ // Water if moisture is below 20% & distance is above 13 CM which means the water container is empty
+    Serial.println("Water time!");
+   digitalWrite(RELAY_PIN, LOW);
+  } else {
+     digitalWrite(RELAY_PIN, HIGH);
+    }
 
-    digitalWrite(motor2pin1, LOW);
-    digitalWrite(motor2pin2, HIGH);
-  }
-  delay(10);
 }

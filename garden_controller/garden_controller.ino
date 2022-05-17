@@ -1,128 +1,123 @@
-#include <Adafruit_MPU6050.h>
-#include <Adafruit_SSD1306.h>
-#include <Adafruit_Sensor.h>
-
-#include <WiFi.h>
 #include <esp_now.h>
+#include <WiFi.h>
 
-Adafruit_MPU6050 mpu;
+#include <Wire.h>
+#define SensorPin 34
+float sensorValue = 0; 
 
-uint8_t broadcastAddress[] = {0x10, 0x97, 0xBD, 0xD4, 0x74, 0x50};
-esp_now_peer_info_t peerInfo;
+// REPLACE WITH THE MAC Address of your receiver 
+uint8_t broadcastAddress[] = {0x10, 0x97, 0xBD, 0xD5, 0xB2, 0x70};
+
+// Define variables to store sensor readings to be sent
+float moisture;
+// Define variables to store incoming readings
+float incomingmoist;
+
+// Variable to store if sending data was successful
 String success;
 
-int incoming_cm;
-int rotor_pin = 4;
-
-
-float outgoing_x;
-float outgoing_y;
-
-const int hall_pin = 34;
-int hall_effect;
-
-typedef struct struct_distance {
-  int cm;
-} struct_distance;
-
+//Structure example to send data
+//Must match the receiver structure
 typedef struct struct_message {
-    float x;
-    float y;
+    float moist;
+
 } struct_message;
 
-struct_distance incoming_distance;
+// Create a struct_message called sensorReadings to hold sensor readings
+struct_message sensorReadings;
 
-struct_message message;
+// Create a struct_message to hold incoming sensor readings
+struct_message incomingReadings;
 
+esp_now_peer_info_t peerInfo;
+
+// Callback when data is sent
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  Serial.print("\r\nLast Packet Send Status:\t");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
-  if (status == 0) {
-   // success = "Delivery Success :)";
+  //Serial.print("\r\nLast Packet Send Status:\t");
+  //Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+  if (status ==0){
+    //success = "Delivery Success :)";
   }
-  else {
+  else{
     success = "Delivery Fail :(";
   }
 }
 
-void OnDataRecv(const uint8_t * mac, const uint8_t * incomingData, int len) {
-    memcpy(&incoming_distance, incomingData, sizeof(incoming_distance));
-
+// Callback when data is received
+void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+  memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
   Serial.print("Bytes received: ");
   Serial.println(len);
-
-  incoming_cm = incoming_distance.cm;
+  incomingmoist = incomingReadings.moist;
 }
-
+ 
 void setup() {
+  // Init Serial Monitor
   Serial.begin(115200);
-
-  pinMode(rotor_pin, OUTPUT);
+  delay(1000); //Take some time to open up the Serial Monitor
   
-  pinMode(hall_pin, INPUT_PULLUP);
-  if (!mpu.begin()) {
-    Serial.println("Sensor init failed");
-    while (1)
-      yield();
-  }
-  Serial.println("Found a MPU-6050 sensor");
-  
+  // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
-  
-  
-  // Init ESP_NOW
+
+  // Init ESP-NOW
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
     return;
-  } 
-  
-  /* Once ESP-NOW is successfully init, we will register for send cb to 
-     get the status of transmittet packets.
-  */
-  esp_now_register_send_cb(OnDataSent);
+  }
 
+  // Once ESPNow is successfully Init, we will register for Send CB to
+  // get the status of Trasnmitted packet
+  esp_now_register_send_cb(OnDataSent);
+  
+  // Register peer
   memcpy(peerInfo.peer_addr, broadcastAddress, 6);
   peerInfo.channel = 0;  
   peerInfo.encrypt = false;
-
-  // Add peer
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+  
+  // Add peer        
+  if (esp_now_add_peer(&peerInfo) != ESP_OK){
     Serial.println("Failed to add peer");
     return;
-    }
-        // Register for a callback function that will be called when data is received
-      esp_now_register_recv_cb(OnDataRecv);
-
   }
+  // Register for a callback function that will be called when data is received
 
+}
+ 
 void loop() {
-
-  //hall_effect = digitalRead(hall_pin);
-  //Serial.print(hall_effect);
-
-  Serial.print("cm: ");
-  Serial.println(incoming_cm);
+  Serial.println("Sensor readings:");
+  float moisture = analogRead(SensorPin);
+  //moisture = moisture/2500*100;
+ // Serial.println(moisture/2300*100);
+   //Serial.println(String(moisture, 2) + String("% Moist"));
+  Serial.println(moisture);
   
-  sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
+  getReadings();
 
-  if (incoming_cm < 15) {
-    analogWrite(rotor_pin, 255);
-  }else {
-    analogWrite(rotor_pin, 0);
-  }
+  // Set values to send
+  sensorReadings.moist = moisture;
 
-  message.x = a.acceleration.x;
-  message.y = a.acceleration.y;
-
-  // Serial.println(a.acceleration.x);
-  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &message, sizeof(message));
-
+  // Send message via ESP-NOW
+  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &sensorReadings, sizeof(sensorReadings));
+   
   if (result == ESP_OK) {
-    // Serial.println("Sent with success");
+   // Serial.println("Sent with success");
   }
   else {
     Serial.println("Error sending the data");
   }
+
+  //delay(10000);
+}
+void getReadings(){
+  moisture = digitalRead(SensorPin);
   delay(100);
+}
+
+void updateDisplay(){
+  
+  // Display Readings in Serial Monitor
+  Serial.println("INCOMING READINGS");
+  Serial.print("moisture: ");
+  Serial.print(incomingReadings.moist);
+  Serial.println("%");
 }
