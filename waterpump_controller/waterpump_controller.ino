@@ -1,21 +1,29 @@
 #include <esp_now.h>
 #include <WiFi.h>
-
+#include <PubSubClient.h>
 #include <Wire.h>
-
 #include <Arduino.h>
 
 #define RELAY_PIN 0 // ESP32 pin 0, which connects to the IN pin of relay
 #define echoPin 5 // attach pin D2 Arduino to pin Echo of HC-SR04
 #define trigPin 18 //attach pin D3 Arduino to pin Trig of HC-SR04
 
+const char* ssid = "LEO1_TEAM_02";
+const char* password = "embeddedlinux";
+const char* mqttServer = "io.adafruit.com";
+const int mqttPort = 1883;
+const char* mqttUser = "bobor16";
+const char* mqttPassword = "aio_MscP52tsMjUOfPf2tQqk4W9aflSS";
+const char* mqttTopic = "bobor16/feeds/moisture";
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
 // REPLACE WITH THE MAC Address of your receiver 
 uint8_t broadcastAddress[] = {0x84, 0x0D, 0x8E, 0xE4, 0xAB, 0x00};
 
 // Define variables to store sensor readings to be sent
 float moisture;
-long duration; // variable for the duration of sound wave travel
-int distance; // variable for the distance measurement
 
 // Define variables to store incoming readings
 float incomingMoist;
@@ -23,6 +31,64 @@ float incomingMoist;
 // Variable to store if sending data was successful
 String success;
 
+//--------- WIFI -------------------------------------------
+
+void wifi_connect() {
+  Serial.print("Starting connecting WiFi.");
+  delay(10);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+//------------------ MQTT ----------------------------------
+void mqtt_setup() {
+  client.setServer(mqttServer, mqttPort);
+    client.setCallback(callback);
+    Serial.println("Connecting to MQTT…");
+    while (!client.connected()) {        
+        String clientId = "ESP32Client-";
+        clientId += String(random(0xffff), HEX);
+        if (client.connect(clientId.c_str(), mqttUser, mqttPassword )) {
+            Serial.println("connected");
+        } else {
+            Serial.print("failed with state  ");
+            Serial.println(client.state());
+            delay(2000);
+        }
+    }
+//    mqtt_send_moisture();
+    client.subscribe(mqttTopic);
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+
+    Serial.print("Message arrived in topic: ");
+    Serial.println(topic);
+
+    String byteRead = "";
+    Serial.print("Message: ");
+    for (int i = 0; i < length; i++) {
+        byteRead += (char)payload[i];
+    }    
+    Serial.println(byteRead);
+}
+/*
+void mqtt_send_moisture() {
+  int moisture = analogRead(pot_pin);
+  Serial.print("Sending moisture level to mqtt");
+  Serial.println(moisture);
+
+  char msg_out[20];
+  sprintf(msg_out, "%d",moisture);
+  client.publish(mqttTopic, msg_out);
+}
+*/
 //Structure example to send data
 //Must match the receiver structure
 typedef struct struct_message {
@@ -58,14 +124,12 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
 }
  
 void setup() {
-  pinMode(trigPin, OUTPUT); // Sets the trigPin as an OUTPUT
-  pinMode(echoPin, INPUT); // Sets the echoPin as an INPUT
-  pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, HIGH);
 
-  
   // Init Serial Monitor
   Serial.begin(115200);
+
+  wifi_connect();
+  mqtt_setup();
 
   // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
@@ -95,30 +159,18 @@ void setup() {
 }
  
 void loop() {
-  // Clears the trigPin condition
-  digitalWrite(trigPin, LOW);
-  delayMicroseconds(2);
-  // Sets the trigPin HIGH (ACTIVE) for 10 microseconds
-  digitalWrite(trigPin, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
-  // Reads the echoPin, returns the sound wave travel time in microseconds
-  duration = pulseIn(echoPin, HIGH);
-  // Calculating the distance
-  distance = duration * 0.034 / 2; // Speed of sound wave divided by 2 (go and back)
-  // Displays the distance on the Serial Monitor
-  Serial.print("ESP Water tank readings");
-  Serial.print('\n');
-  Serial.print("Distance: ");
-  Serial.print(distance);
-  Serial.println(" cm");
-  getReadings();
+    client.loop();
 
+  
+  //Serial.println("recieved with esp_now");
+  //Serial.println(incomingMoist);
   // Set values to send
-  sensorReadings.moist = 11;
+  // sensorReadings.moist = 11;
+
+/*
 
   // Send message via ESP-NOW
-  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &sensorReadings, sizeof(sensorReadings));
+   esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &sensorReadings, sizeof(sensorReadings));
    
   if (result == ESP_OK) {
     //Serial.println("Sent with success");
@@ -126,26 +178,6 @@ void loop() {
   else {
     Serial.println("Error sending the data");
   }
-  handlePump();
-
-  delay(10000);
-}
-void getReadings(){
-  moisture = 11;
-
-}
-
-void handlePump(){
-  // Display Readings in Serial Monitor
-  Serial.println("ESP Garden bed readings");
-  Serial.print("Moisture: ");
-  Serial.print(incomingReadings.moist);
-
-  if(incomingReadings.moist<20 && distance<13){ // Water if moisture is below 20% & distance is above 13 CM which means the water container is empty
-    Serial.println("Water time!");
-   digitalWrite(RELAY_PIN, LOW);
-  } else {
-     digitalWrite(RELAY_PIN, HIGH);
-    }
-
+  */
+  //delay(10000);
 }
