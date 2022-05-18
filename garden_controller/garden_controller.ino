@@ -1,8 +1,21 @@
 #include <esp_now.h>
 #include <WiFi.h>
-
+#include <PubSubClient.h>
 #include <Wire.h>
-#define SensorPin 34
+
+#define pot_pin 34
+
+const char* ssid = "LEO1_TEAM_02";
+const char* password = "embeddedlinux";
+const char* mqttServer = "io.adafruit.com";
+const int mqttPort = 1883;
+const char* mqttUser = "bobor16";
+const char* mqttPassword = "aio_MscP52tsMjUOfPf2tQqk4W9aflSS";
+const char* mqttTopic = "bobor16/feeds/moisture";
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
 float sensorValue = 0; 
 
 // REPLACE WITH THE MAC Address of your receiver 
@@ -15,6 +28,63 @@ float incomingmoist;
 
 // Variable to store if sending data was successful
 String success;
+
+//--------- WIFI -------------------------------------------
+
+void wifi_connect() {
+  Serial.print("Starting connecting WiFi.");
+  delay(10);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+//------------------ MQTT ----------------------------------
+void mqtt_setup() {
+  client.setServer(mqttServer, mqttPort);
+    client.setCallback(callback);
+    Serial.println("Connecting to MQTT…");
+    while (!client.connected()) {        
+        String clientId = "ESP32Client-";
+        clientId += String(random(0xffff), HEX);
+        if (client.connect(clientId.c_str(), mqttUser, mqttPassword )) {
+            Serial.println("connected");
+        } else {
+            Serial.print("failed with state  ");
+            Serial.println(client.state());
+            delay(2000);
+        }
+    }
+    mqtt_send_moisture();
+    client.subscribe(mqttTopic);
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+
+    Serial.print("Message arrived in topic: ");
+    Serial.println(topic);
+
+    String byteRead = "";
+    Serial.print("Message: ");
+    for (int i = 0; i < length; i++) {
+        byteRead += (char)payload[i];
+    }    
+    Serial.println(byteRead);
+}
+void mqtt_send_moisture() {
+  int moisture = analogRead(pot_pin);
+  Serial.print("Sending moisture level to mqtt");
+  Serial.println(moisture);
+
+  char msg_out[20];
+  sprintf(msg_out, "%d",moisture);
+  client.publish(mqttTopic, msg_out);
+}
 
 //Structure example to send data
 //Must match the receiver structure
@@ -55,7 +125,8 @@ void setup() {
   // Init Serial Monitor
   Serial.begin(115200);
   delay(1000); //Take some time to open up the Serial Monitor
-  
+    wifi_connect();
+  mqtt_setup();  
   // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
 
@@ -84,14 +155,11 @@ void setup() {
 }
  
 void loop() {
+  client.loop();
   Serial.println("Sensor readings:");
-  float moisture = analogRead(SensorPin);
-  //moisture = moisture/2500*100;
- // Serial.println(moisture/2300*100);
-   //Serial.println(String(moisture, 2) + String("% Moist"));
+  float moisture = analogRead(pot_pin);
   Serial.println(moisture);
-  
-  getReadings();
+  mqtt_send_moisture();
 
   // Set values to send
   sensorReadings.moist = moisture;
@@ -105,19 +173,5 @@ void loop() {
   else {
     Serial.println("Error sending the data");
   }
-
-  //delay(10000);
-}
-void getReadings(){
-  moisture = digitalRead(SensorPin);
-  delay(100);
-}
-
-void updateDisplay(){
-  
-  // Display Readings in Serial Monitor
-  Serial.println("INCOMING READINGS");
-  Serial.print("moisture: ");
-  Serial.print(incomingReadings.moist);
-  Serial.println("%");
+  delay(10000);
 }
