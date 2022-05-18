@@ -8,7 +8,8 @@
 const char* ssid = "LEO1_TEAM_02";
 const char* password = "embeddedlinux";
 
-const char* mqttServer = "";
+
+const char* mqttServer = ""; // Add rpi ip.
 const int mqttPort = 1883;
 const char* mqttTopic = "feeds/moisture";
 
@@ -83,7 +84,7 @@ void setup() {
   Serial.begin(115200);
   delay(1000); //Take some time to open up the Serial Monitor
   wifi_connect();
-//  mqtt_setup();  
+
   // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
 
@@ -95,5 +96,5 @@ void loop() {
     reconnect();
   }
   mqtt_send_moisture();
-  delay(10000);
+  delay(5000);
 }
